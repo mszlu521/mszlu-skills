@@ -1,6 +1,8 @@
-# Skills 集合说明
+# 码神 Skills 集合
 
-本仓库包含 Spring AI Alibaba 相关的 Skills，用于在 Claude Code 中提供开发指导。
+码神（[www.mszlu.com](https://www.mszlu.com)）的 Claude Skills 集合。
+
+本仓库包含各类开发相关的 Skills，用于在 Claude Code 中提供开发指导和最佳实践。
 
 ## 目录结构
 
