@@ -1,0 +1,12 @@
+{
+  "name": "mszlu-skills",
+  "description": "Spring AI Alibaba 开发指导 Skills 集合",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "spring-ai-alibaba-dev-guide",
+      "path": "skills/spring-ai-alibaba-dev-guide",
+      "description": "Spring AI Alibaba 开发指导 Skill。涵盖 Agents、Models、Tools、Memory、Hooks、多智能体编排、RAG、Graph 等所有核心功能。"
+    }
+  ]
+}

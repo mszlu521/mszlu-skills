@@ -6,7 +6,7 @@ description: |
   Hooks、Interceptors、Skills、Structured Output、上下文工程、人工介入、记忆管理、
   多智能体编排、智能体作为工具、工作流、RAG、A2A、Graph、Chat UI、Admin、DeepResearch、
   Data Agent、Assistant Agent、Tool Calling 等所有核心功能。
-  
+
   触发场景：
   - 用户询问如何使用 Spring AI Alibaba 开发 AI 应用
   - 用户需要创建 Agent、ChatBot、工作流、RAG 系统
@@ -16,6 +16,15 @@ description: |
   - 用户需要 A2A、Graph 工作流、DeepResearch、Data Agent
   - 用户遇到 Spring AI Alibaba 相关的任何开发问题
   - 用户需要最佳实践、示例代码、项目结构指导
+metadata:
+  author: mszlu.com
+  version: 1.0.0
+  tags:
+    - spring-ai
+    - alibaba
+    - agent
+    - java
+    - ai-framework
 ---
 
 # Spring AI Alibaba 开发指导
