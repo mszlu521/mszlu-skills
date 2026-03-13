@@ -1,0 +1,35 @@
+{
+  "skill_name": "spring-ai-alibaba-dev-guide",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想用 Spring AI Alibaba 创建一个简单的聊天机器人，需要哪些依赖？",
+      "expected_output": "提供 Maven 依赖配置，包括 spring-ai-alibaba-agent-framework 和模型 starter（如 dashscope）",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "如何在 Spring AI Alibaba 中创建一个带有工具调用的 Agent？请给我完整的代码示例。",
+      "expected_output": "提供完整的 ReactAgent 配置代码，包括 @Configuration 类、工具定义、Agent 构建等",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我需要实现一个多 Agent 工作流，包含数据提取、分析和报告生成三个步骤，应该用什么模式？",
+      "expected_output": "推荐使用 SequentialAgent 或 Graph API，并提供相应的代码示例和架构建议",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Spring AI Alibaba 的持久化有哪些选项？生产环境推荐用哪个？",
+      "expected_output": "列出 MemorySaver、RedisSaver、MysqlSaver、PostgresSaver、MongoSaver 等选项，并根据场景给出推荐",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "如何在 Agent 中集成 MCP 工具？",
+      "expected_output": "提供 McpToolCallback 的配置示例，包括远程 MCP 服务器的连接方式",
+      "files": []
+    }
+  ]
+}
