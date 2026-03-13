@@ -16,15 +16,6 @@ description: |
   - 用户需要 A2A、Graph 工作流、DeepResearch、Data Agent
   - 用户遇到 Spring AI Alibaba 相关的任何开发问题
   - 用户需要最佳实践、示例代码、项目结构指导
-metadata:
-  author: mszlu.com
-  version: 1.0.0
-  tags:
-    - spring-ai
-    - alibaba
-    - agent
-    - java
-    - ai-framework
 ---
 
 # Spring AI Alibaba 开发指导
@@ -40,6 +31,754 @@ metadata:
     <spring-ai-alibaba.version>1.1.2.2</spring-ai-alibaba.version>
 </properties>
 ```
+
+---
+
+## Spring AI 基础
+
+Spring AI Alibaba 基于 **Spring AI 1.1.2** 构建，理解 Spring AI 的核心概念对于开发 Spring AI Alibaba 应用至关重要。
+
+### Spring AI 与 Spring AI Alibaba 的关系
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Spring AI Alibaba                         │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Spring AI 1.1.2 (Base)                 │   │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌───────────────┐  │   │
+│  │  │  ChatModel  │ │ ChatClient  │ │  VectorStore  │  │   │
+│  │  └─────────────┘ └─────────────┘ └───────────────┘  │   │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌───────────────┐  │   │
+│  │  │   Prompt    │ │    Tool     │ │   Advisor     │  │   │
+│  │  └─────────────┘ └─────────────┘ └───────────────┘  │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │         Spring AI Alibaba Extensions                │   │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌───────────────┐  │   │
+│  │  │ReactAgent   │ │ StateGraph  │ │   A2A         │  │   │
+│  │  └─────────────┘ └─────────────┘ └───────────────┘  │   │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌───────────────┐  │   │
+│  │  │Multi-Agent  │ │DashScope    │ │   MCP         │  │   │
+│  │  └─────────────┘ └─────────────┘ └───────────────┘  │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Spring AI 核心架构
+
+Spring AI 提供了一套统一的抽象层，用于与各种 AI 模型和服务交互：
+
+| 组件 | 说明 | 主要接口/类 |
+|------|------|------------|
+| **ChatModel** | 聊天模型核心接口 | `ChatModel`, `StreamingChatModel` |
+| **ChatClient** | Fluent API 客户端 | `ChatClient`, `ChatClient.Builder` |
+| **Prompt** | 提示词封装 | `Prompt`, `PromptTemplate` |
+| **Messages** | 消息类型体系 | `UserMessage`, `SystemMessage`, `AssistantMessage`, `ToolResponseMessage` |
+| **ChatOptions** | 模型调用选项 | `ChatOptions`, `FunctionOptions` |
+| **Tools** | 函数/工具调用 | `ToolCallback`, `ToolDefinition` |
+| **Advisor** | 拦截器/切面 | `Advisor`, `CallAdvisor`, `StreamAdvisor` |
+| **VectorStore** | 向量存储 | `VectorStore`, `Document` |
+| **Embedding** | 嵌入模型 | `EmbeddingModel`, `EmbeddingClient` |
+
+### ChatModel API
+
+`ChatModel` 是 Spring AI 的核心接口，定义了与 AI 模型交互的基础方法：
+
+```java
+public interface ChatModel extends Model<Prompt, ChatResponse>, StreamingChatModel {
+    // 简单文本调用
+    default String call(String message);
+
+    // 多消息调用
+    default String call(Message... messages);
+
+    // Prompt 调用（核心方法）
+    ChatResponse call(Prompt prompt);
+
+    // 流式调用
+    default Flux<ChatResponse> stream(Prompt prompt);
+
+    // 获取默认选项
+    default ChatOptions getDefaultOptions();
+}
+```
+
+**使用示例：**
+
+```java
+@Service
+public class ChatService {
+    @Autowired
+    private ChatModel chatModel;
+
+    public String chat(String message) {
+        // 简单调用
+        return chatModel.call(message);
+    }
+
+    public String chatWithHistory(List<Message> messages) {
+        // 带历史的对话
+        Prompt prompt = new Prompt(messages);
+        ChatResponse response = chatModel.call(prompt);
+        return response.getResult().getOutput().getText();
+    }
+
+    public Flux<String> streamChat(String message) {
+        // 流式输出
+        return chatModel.stream(new Prompt(message))
+            .map(r -> r.getResult().getOutput().getText());
+    }
+}
+```
+
+### ChatClient Fluent API
+
+`ChatClient` 提供了更便捷的流式 API 用于构建对话：
+
+```java
+// 创建 ChatClient
+ChatClient chatClient = ChatClient.builder(chatModel).build();
+
+// 简单调用
+String response = chatClient.prompt("你好").call().content();
+
+// 带系统提示的调用
+String response = chatClient.prompt()
+    .system("你是一个专业的助手")
+    .user("你好")
+    .call()
+    .content();
+
+// 流式调用
+Flux<String> stream = chatClient.prompt("你好").stream().content();
+
+// 使用工具
+String response = chatClient.prompt()
+    .user("上海天气如何？")
+    .tools(weatherTool)
+    .call()
+    .content();
+
+// 结构化输出
+ProductInfo product = chatClient.prompt()
+    .user("分析这个产品的信息")
+    .call()
+    .entity(ProductInfo.class);
+```
+
+**ChatClient 完整配置：**
+
+```java
+@Configuration
+public class ChatClientConfig {
+
+    @Bean
+    public ChatClient chatClient(ChatModel chatModel) {
+        return ChatClient.builder(chatModel)
+            // 默认系统提示
+            .defaultSystem("你是一个专业的AI助手")
+            // 默认选项
+            .defaultOptions(
+                ChatOptions.builder()
+                    .temperature(0.7)
+                    .maxTokens(2000)
+                    .build()
+            )
+            // 默认工具
+            .defaultTools(weatherTool, calculatorTool)
+            // 默认 Advisors
+            .defaultAdvisors(
+                new SimpleLoggerAdvisor(),
+                new MessageChatMemoryAdvisor(chatMemory)
+            )
+            .build();
+    }
+}
+```
+
+### Prompt 和 Messages
+
+Spring AI 提供了完整的消息类型体系：
+
+```java
+// ===== 消息类型 =====
+
+// 系统消息 - 设置AI角色和行为
+SystemMessage systemMessage = new SystemMessage("你是专业助手");
+SystemMessage systemMessage = SystemMessage.builder()
+    .text("你是专业助手")
+    .metadata(Map.of("version", "1.0"))
+    .build();
+
+// 用户消息 - 用户输入
+UserMessage userMessage = new UserMessage("你好");
+UserMessage userMessage = UserMessage.builder()
+    .text("分析这张图片")
+    .media(new Media(MimeTypeUtils.IMAGE_PNG, imageResource))
+    .build();
+
+// 助手消息 - AI回复
+AssistantMessage assistantMessage = new AssistantMessage("你好！有什么可以帮助你？");
+
+// 工具响应消息
+ToolResponseMessage toolMessage = ToolResponseMessage.builder()
+    .responses(List.of(
+        new ToolResponseMessage.ToolResponse("call_123", "工具执行结果")
+    ))
+    .build();
+
+// ===== 构建 Prompt =====
+
+// 简单 Prompt
+Prompt prompt = new Prompt("你好");
+
+// 带选项的 Prompt
+Prompt prompt = new Prompt(
+    "你好",
+    ChatOptions.builder()
+        .temperature(0.7)
+        .maxTokens(1000)
+        .build()
+);
+
+// 多消息 Prompt
+Prompt prompt = new Prompt(List.of(
+    new SystemMessage("你是专业助手"),
+    new UserMessage("你好")
+));
+
+// 使用 Builder
+Prompt prompt = Prompt.builder()
+    .messages(
+        SystemMessage.builder().text("你是专业助手").build(),
+        UserMessage.builder()
+            .text("分析这张图片")
+            .media(new Media(MimeTypeUtils.IMAGE_PNG, imageResource))
+            .build()
+    )
+    .chatOptions(ChatOptions.builder().temperature(0.5).build())
+    .build();
+```
+
+### ChatOptions 配置
+
+```java
+// 通用选项
+ChatOptions options = ChatOptions.builder()
+    .model("qwen-max")              // 模型名称
+    .temperature(0.7)               // 随机性 (0.0-2.0)
+    .maxTokens(2000)                // 最大生成token数
+    .topP(0.9)                      // 核采样
+    .topK(50)                       // Top-K采样
+    .frequencyPenalty(0.5)          // 频率惩罚
+    .presencePenalty(0.5)           // 存在惩罚
+    .stopSequences(List.of("STOP")) // 停止序列
+    .build();
+
+// DashScope 特定选项
+DashScopeChatOptions dashScopeOptions = DashScopeChatOptions.builder()
+    .model("qwen-max")
+    .temperature(0.7)
+    .responseFormat(ResponseFormat.JSON)  // JSON 模式
+    .multiModel(true)                      // 多模态
+    .build();
+
+// OpenAI 特定选项
+OpenAiChatOptions openAiOptions = OpenAiChatOptions.builder()
+    .model("gpt-4")
+    .temperature(0.7)
+    .tools(List.of("function1", "function2"))  // 指定可用工具
+    .build();
+```
+
+### Advisor 机制
+
+Advisor 是 Spring AI 的拦截器机制，用于在请求处理前后执行逻辑：
+
+```java
+// 使用内置 Advisors
+ChatClient chatClient = ChatClient.builder(chatModel)
+    .defaultAdvisors(
+        // 记录日志
+        new SimpleLoggerAdvisor(),
+        // 聊天记忆 - 自动维护对话历史
+        new MessageChatMemoryAdvisor(chatMemory, "conversationId", 10),
+        // RAG 检索 - 自动检索相关文档
+        new QuestionAnswerAdvisor(vectorStore),
+        // 安全过滤
+        new SafeGuardAdvisor(Set.of("敏感词")),
+        // 结构化输出验证
+        new StructuredOutputValidationAdvisor()
+    )
+    .build();
+
+// 自定义 Advisor
+@Component
+public class LoggingAdvisor implements CallAdvisor {
+    private static final Logger log = LoggerFactory.getLogger(LoggingAdvisor.class);
+
+    @Override
+    public String getName() {
+        return "LoggingAdvisor";
+    }
+
+    @Override
+    public int getOrder() {
+        return Ordered.HIGHEST_PRECEDENCE;
+    }
+
+    @Override
+    public ChatClientResponse adviseCall(AdvisedRequest request, CallAdvisorChain chain) {
+        // 前置处理
+        log.info("Request: {}", request.userText());
+        long startTime = System.currentTimeMillis();
+
+        // 执行链
+        ChatClientResponse response = chain.next(request);
+
+        // 后置处理
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Response time: {}ms", duration);
+
+        return response;
+    }
+}
+```
+
+### Vector Store 和 RAG
+
+Spring AI 提供了统一的 Vector Store 抽象：
+
+```java
+// 创建 Vector Store
+@Bean
+public VectorStore vectorStore(EmbeddingModel embeddingModel) {
+    // 简单内存存储
+    return SimpleVectorStore.builder(embeddingModel).build();
+
+    // 或 Redis
+    // return RedisVectorStore.builder(redisTemplate, embeddingModel).build();
+
+    // 或 PostgreSQL (PGVector)
+    // return PgVectorStore.builder(dataSource, embeddingModel).build();
+}
+
+// 文档索引
+@Service
+public class DocumentService {
+    @Autowired
+    private VectorStore vectorStore;
+
+    public void indexDocuments(List<Resource> resources) {
+        // 文本分割器
+        TokenTextSplitter splitter = new TokenTextSplitter(
+            500,  // chunk size
+            50,   // overlap
+            10,   // min chunk size
+            1000, // max chunk size
+            true  // keep separator
+        );
+
+        for (Resource resource : resources) {
+            // 读取并分割文档
+            String content = readResource(resource);
+            List<String> chunks = splitter.split(content);
+
+            // 创建 Document 并添加元数据
+            List<Document> documents = chunks.stream()
+                .map(chunk -> new Document(
+                    chunk,
+                    Map.of(
+                        "source", resource.getFilename(),
+                        "timestamp", Instant.now().toString()
+                    )
+                ))
+                .toList();
+
+            // 存入向量数据库
+            vectorStore.add(documents);
+        }
+    }
+}
+
+// RAG 检索
+@Bean
+public VectorStoreDocumentRetriever documentRetriever(VectorStore vectorStore) {
+    return VectorStoreDocumentRetriever.builder()
+        .vectorStore(vectorStore)
+        .similarityThreshold(0.7)
+        .topK(5)
+        .filterExpression("type == 'document'")
+        .build();
+}
+```
+
+### Tool/Function Calling
+
+Spring AI 支持将 Java 方法暴露为 AI 可调用的工具：
+
+```java
+// 方式 1: 使用 @Tool 注解
+@Component
+public class WeatherTool {
+
+    @Tool(name = "get_weather", description = "获取指定城市的天气信息")
+    public WeatherInfo getWeather(
+            @ToolParam(description = "城市名称，如：北京、上海") String city) {
+        // 实现天气查询逻辑
+        return new WeatherInfo(city, "晴天", 25);
+    }
+}
+
+// 方式 2: 编程式创建 ToolCallback
+@Bean
+public ToolCallback searchTool() {
+    return FunctionToolCallback.builder("search", (SearchRequest request) -> {
+        // 执行搜索
+        return searchService.search(request.query());
+    })
+    .description("搜索知识库")
+    .inputType(SearchRequest.class)
+    .build();
+}
+
+// 注册工具
+@Bean
+public ChatClient chatClient(ChatModel chatModel, WeatherTool weatherTool) {
+    return ChatClient.builder(chatModel)
+        .defaultTools(weatherTool)
+        .build();
+}
+
+// 使用工具
+@Service
+public class ToolService {
+    @Autowired
+    private ChatClient chatClient;
+
+    public String chatWithTools(String message) {
+        return chatClient.prompt()
+            .user(message)
+            .call()
+            .content();
+    }
+}
+```
+
+### 结构化输出
+
+Spring AI 支持将模型输出映射到 Java 对象：
+
+```java
+// 定义输出结构
+public record ProductInfo(
+    String name,
+    double price,
+    List<String> features,
+    String category
+) {}
+
+// 使用 ChatClient
+@Service
+public class StructuredOutputService {
+    @Autowired
+    private ChatClient chatClient;
+
+    public ProductInfo extractProductInfo(String description) {
+        return chatClient.prompt()
+            .user(u -> u.text("""
+                从以下描述中提取产品信息：
+                {description}
+                """
+            ).param("description", description))
+            .call()
+            .entity(ProductInfo.class);
+    }
+
+    public List<String> extractKeywords(String text) {
+        return chatClient.prompt()
+            .user("从以下文本中提取关键词：" + text)
+            .call()
+            .entity(new ParameterizedTypeReference<List<String>>() {});
+    }
+}
+
+// 使用 BeanOutputParser
+@Service
+public class ParserService {
+    @Autowired
+    private ChatModel chatModel;
+
+    public ProductInfo parseWithBeanParser(String description) {
+        BeanOutputParser<ProductInfo> parser = new BeanOutputParser<>(ProductInfo.class);
+
+        String prompt = """
+            提取产品信息。
+            输出格式: {format}
+
+            描述: {description}
+            """;
+
+        PromptTemplate template = new PromptTemplate(
+            prompt,
+            Map.of(
+                "format", parser.getFormat(),
+                "description", description
+            )
+        );
+
+        ChatResponse response = chatModel.call(template.create());
+        return parser.parse(response.getResult().getOutput().getText());
+    }
+}
+```
+
+### 多模型厂商支持
+
+Spring AI Alibaba 对模型提供方的支持分为两类：
+
+| 类型 | 说明 | 依赖来源 |
+|------|------|----------|
+| **内置支持** | DashScope（阿里云百炼） | `spring-ai-alibaba-starter-dashscope` |
+| **Spring AI 原生支持** | OpenAI、DeepSeek、Ollama、Azure OpenAI 等 | Spring AI 官方 starters |
+
+#### 模型厂商依赖配置
+
+**1. DashScope（阿里云）- Spring AI Alibaba 内置**
+
+```xml
+<dependency>
+    <groupId>com.alibaba.cloud.ai</groupId>
+    <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+    <version>1.1.2.2</version>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    dashscope:
+      api-key: ${AI_DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen-max  # 或其他模型：qwen-plus, qwen-turbo, qwen-vl-max 等
+```
+
+**2. OpenAI - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: https://api.openai.com/v1  # 可选，用于代理或兼容接口
+      chat:
+        options:
+          model: gpt-4o
+          temperature: 0.7
+```
+
+**3. DeepSeek - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-deepseek-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY}
+      base-url: https://api.deepseek.com/v1
+      chat:
+        options:
+          model: deepseek-chat  # 或 deepseek-coder
+```
+
+**4. Ollama（本地模型）- Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-ollama-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    ollama:
+      base-url: http://localhost:11434  # Ollama 服务地址
+      chat:
+        options:
+          model: llama3.1  # 或 mistral, qwen2 等
+```
+
+**5. Azure OpenAI - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-azure-openai-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    azure:
+      openai:
+        api-key: ${AZURE_OPENAI_API_KEY}
+        endpoint: https://your-resource.openai.azure.com
+        chat:
+          options:
+            deployment-name: gpt-4o
+```
+
+**6. Anthropic Claude - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-anthropic-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}
+      chat:
+        options:
+          model: claude-3-opus-20240229
+```
+
+**7. 智谱 AI (ZhiPu AI) - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-zhipuai-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    zhipuai:
+      api-key: ${ZHIPUAI_API_KEY}
+      chat:
+        options:
+          model: glm-4  # 或 glm-3-turbo
+```
+
+**8. 月之暗面 (Moonshot/Kimi) - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-moonshot-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    moonshot:
+      api-key: ${MOONSHOT_API_KEY}
+      chat:
+        options:
+          model: moonshot-v1-8k  # 或 moonshot-v1-32k, moonshot-v1-128k
+```
+
+**9. MiniMax - Spring AI 原生支持**
+
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-minimax-spring-boot-starter</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  ai:
+    minimax:
+      api-key: ${MINIMAX_API_KEY}
+      chat:
+        options:
+          model: abab6.5-chat
+```
+
+#### 多模型共存配置
+
+可以在同一个项目中配置多个模型，按需注入使用：
+
+```java
+@Configuration
+public class MultiModelConfig {
+
+    // DashScope - 用于通用对话
+    @Bean
+    public ChatClient dashScopeChatClient(@Qualifier("dashscopeChatModel") ChatModel chatModel) {
+        return ChatClient.builder(chatModel).build();
+    }
+
+    // OpenAI - 用于特定功能
+    @Bean
+    public ChatClient openAiChatClient(@Qualifier("openaiChatModel") ChatModel chatModel) {
+        return ChatClient.builder(chatModel).build();
+    }
+
+    // Ollama - 用于本地隐私场景
+    @Bean
+    public ChatClient ollamaChatClient(@Qualifier("ollamaChatModel") ChatModel chatModel) {
+        return ChatClient.builder(chatModel).build();
+    }
+}
+
+@Service
+public class MultiModelService {
+
+    @Autowired
+    @Qualifier("dashScopeChatClient")
+    private ChatClient dashScopeClient;
+
+    @Autowired
+    @Qualifier("openAiChatClient")
+    private ChatClient openAiClient;
+
+    public String chatWithDashScope(String message) {
+        return dashScopeClient.prompt(message).call().content();
+    }
+
+    public String chatWithOpenAI(String message) {
+        return openAiClient.prompt(message).call().content();
+    }
+}
+```
+
+#### 模型选择建议
+
+| 场景 | 推荐模型 | 说明 |
+|------|----------|------|
+| 国内部署 | DashScope (qwen-max) | 阿里云国内节点，访问稳定 |
+| 中文处理 | DashScope、DeepSeek | 对中文优化更好 |
+| 代码生成 | DeepSeek Coder、GPT-4o | 代码能力强 |
+| 本地/离线 | Ollama + Llama3/Qwen2 | 数据不出域 |
+| 长文本 | Moonshot (128k)、GPT-4o (128k) | 支持超长上下文 |
+| 成本敏感 | DashScope (qwen-turbo) | 价格较低 |
 
 ---
 
@@ -61,7 +800,7 @@ metadata:
         <artifactId>spring-ai-alibaba-agent-framework</artifactId>
         <version>1.1.2.2</version>
     </dependency>
-    
+
     <!-- 模型提供方（选择其一） -->
     <!-- DashScope（阿里云） -->
     <dependency>
@@ -69,7 +808,7 @@ metadata:
         <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
         <version>1.1.2.2</version>
     </dependency>
-    
+
     <!-- 或 OpenAI -->
     <dependency>
         <groupId>org.springframework.ai</groupId>
@@ -217,13 +956,13 @@ ReactAgent 是 Spring AI Alibaba 的核心 Agent 实现，支持推理-行动循
 ```java
 @Configuration
 public class AgentConfig {
-    
+
     private static final String INSTRUCTION = """
         You are a helpful assistant named SAA.
         You have access to tools that can help you accomplish tasks.
         Think step by step and use tools when necessary.
         """;
-    
+
     @Bean
     public ReactAgent simpleAgent(
             ChatModel chatModel,
@@ -236,7 +975,7 @@ public class AgentConfig {
             .enableLogging(true)
             .build();
     }
-    
+
     @Bean
     public MemorySaver memorySaver() {
         return new MemorySaver();
@@ -249,12 +988,12 @@ public class AgentConfig {
 ```java
 @Configuration
 public class ToolAgentConfig {
-    
+
     private static final String INSTRUCTION = """
         You are a data analysis assistant.
         Use the available tools to fetch and analyze data.
         """;
-    
+
     @Bean
     public ReactAgent toolAgent(
             ChatModel chatModel,
@@ -279,10 +1018,10 @@ public class ToolAgentConfig {
 ```java
 @Service
 public class StreamingAgentService {
-    
+
     @Autowired
     private ReactAgent agent;
-    
+
     public Flux<String> streamChat(String input) {
         return agent.stream(input)
             .map(output -> output.getOutput().getText());
@@ -299,10 +1038,10 @@ public class StreamingAgentService {
 ```java
 // 定义工具函数
 public class SearchTool {
-    
+
     public record SearchRequest(String query, int limit) {}
     public record SearchResult(List<String> results) {}
-    
+
     @Tool(description = "Search for information")
     public SearchResult search(SearchRequest request) {
         // 实现搜索逻辑
@@ -325,13 +1064,13 @@ public ToolCallback searchTool() {
 ```java
 @Component
 public class CalculatorTool {
-    
+
     @Tool(name = "add", description = "Add two numbers")
     public double add(@ToolParam(description = "First number") double a,
                       @ToolParam(description = "Second number") double b) {
         return a + b;
     }
-    
+
     @Tool(name = "multiply", description = "Multiply two numbers")
     public double multiply(double a, double b) {
         return a * b;
@@ -352,10 +1091,10 @@ public ToolCallbackResolver toolCallbackResolver(CalculatorTool calculator) {
 ```java
 @Service
 public class ManualToolService {
-    
+
     @Autowired
     private ChatModel chatModel;
-    
+
     public String chatWithTools(String input, List<ToolCallback> tools) {
         // 创建 Prompt
         Prompt prompt = new Prompt(
@@ -364,14 +1103,14 @@ public class ManualToolService {
                 .toolCallbacks(tools)
                 .build()
         );
-        
+
         // 第一次调用获取工具请求
         ChatResponse response = chatModel.call(prompt);
-        
+
         // 检查是否有工具调用
         if (response.getResult().getOutput() instanceof AssistantMessage assistantMsg
                 && assistantMsg.hasToolCalls()) {
-            
+
             // 执行工具调用
             List<ToolResponseMessage> toolResponses = new ArrayList<>();
             for (ToolCall toolCall : assistantMsg.getToolCalls()) {
@@ -380,18 +1119,18 @@ public class ManualToolService {
                     List.of(new ToolResponseMessage.ToolResponse(toolCall.id(), result))
                 ));
             }
-            
+
             // 第二次调用获取最终回复
             Prompt followUpPrompt = new Prompt(List.of(
                 new UserMessage(input),
                 new AssistantMessage(assistantMsg.getText()),
                 toolResponses.get(0)
             ));
-            
+
             ChatResponse finalResponse = chatModel.call(followUpPrompt);
             return finalResponse.getResult().getOutput().getText();
         }
-        
+
         return response.getResult().getOutput().getText();
     }
 }
@@ -411,13 +1150,13 @@ Skills 是可复用的 Agent 能力模块。
 
 @Component
 public class DataAnalysisSkill {
-    
+
     private static final String SKILL_INSTRUCTION = """
         You are a data analysis expert.
         You can analyze CSV, JSON, and Excel files.
         Provide insights and visualizations.
         """;
-    
+
     @Bean
     public ReactAgent dataAnalysisAgent(
             ChatModel chatModel,
@@ -429,7 +1168,7 @@ public class DataAnalysisSkill {
             .saver(memorySaver)
             .build();
     }
-    
+
     @Bean
     public ToolCallback csvParserTool() {
         return FunctionToolCallback.builder("parse_csv", this::parseCsv)
@@ -437,7 +1176,7 @@ public class DataAnalysisSkill {
             .inputType(CsvParseRequest.class)
             .build();
     }
-    
+
     private CsvParseResult parseCsv(CsvParseRequest request) {
         // 实现 CSV 解析
         return new CsvParseResult();
@@ -450,10 +1189,10 @@ public class DataAnalysisSkill {
 ```java
 @Service
 public class SkillBasedAgent {
-    
+
     @Autowired
     private ApplicationContext context;
-    
+
     public ReactAgent loadSkill(String skillName) {
         // 从 Spring 上下文加载 Skill Agent
         return context.getBean(skillName + "Agent", ReactAgent.class);
@@ -478,25 +1217,25 @@ public record ProductInfo(
 
 @Service
 public class StructuredOutputService {
-    
+
     @Autowired
     private ChatModel chatModel;
-    
+
     public ProductInfo extractProductInfo(String description) {
         BeanOutputParser<ProductInfo> parser = new BeanOutputParser<>(ProductInfo.class);
-        
+
         String prompt = """
             Extract product information from the following description.
             {format}
-            
+
             Description: {description}
             """;
-        
+
         PromptTemplate template = new PromptTemplate(
             prompt,
             Map.of("format", parser.getFormat(), "description", description)
         );
-        
+
         ChatResponse response = chatModel.call(template.create());
         return parser.parse(response.getResult().getOutput().getText());
     }
@@ -541,16 +1280,16 @@ Hooks 允许在 Agent 执行过程中插入自定义逻辑。
 ```java
 @Component
 public class LoggingHook implements AgentHook {
-    
+
     private static final Logger log = LoggerFactory.getLogger(LoggingHook.class);
-    
+
     @Override
     public void beforeCall(AgentContext context) {
-        log.info("Agent {} starting iteration {}", 
-            context.getAgentName(), 
+        log.info("Agent {} starting iteration {}",
+            context.getAgentName(),
             context.getIteration());
     }
-    
+
     @Override
     public void afterCall(AgentContext context, AgentOutput output) {
         log.info("Agent {} completed iteration {} with {} tool calls",
@@ -558,11 +1297,11 @@ public class LoggingHook implements AgentHook {
             context.getIteration(),
             output.getToolCalls().size());
     }
-    
+
     @Override
     public void onError(AgentContext context, Exception error) {
-        log.error("Agent {} encountered error: {}", 
-            context.getAgentName(), 
+        log.error("Agent {} encountered error: {}",
+            context.getAgentName(),
             error.getMessage());
     }
 }
@@ -591,21 +1330,21 @@ public ReactAgent agentWithHook(
 ```java
 @Component
 public class TokenLimitInterceptor implements MessageInterceptor {
-    
+
     private final int maxTokens = 4000;
-    
+
     @Override
     public List<Message> intercept(List<Message> messages) {
         int totalTokens = estimateTokens(messages);
-        
+
         if (totalTokens > maxTokens) {
             // 压缩或截断消息
             return compressMessages(messages);
         }
-        
+
         return messages;
     }
-    
+
     private int estimateTokens(List<Message> messages) {
         // 估算 token 数量
         return messages.stream()
@@ -717,11 +1456,11 @@ public ReactAgent agentWithToolConfirmation(ChatModel chatModel) {
 ```java
 @Service
 public class WebSocketHumanLoopService {
-    
+
     public ReactAgent createInteractiveAgent(
             ChatModel chatModel,
             SimpMessagingTemplate messaging) {
-        
+
         return ReactAgent.builder()
             .name("InteractiveAgent")
             .model(chatModel)
@@ -731,7 +1470,7 @@ public class WebSocketHumanLoopService {
                 public boolean shouldInterrupt(AgentContext context) {
                     return context.getIteration() > 2;
                 }
-                
+
                 @Override
                 public String getUserInput(AgentContext context) {
                     // 通过 WebSocket 发送请求并等待用户输入
@@ -756,7 +1495,7 @@ public SequentialAgent pipelineAgent(
         ReactAgent dataExtractionAgent,
         ReactAgent analysisAgent,
         ReactAgent reportAgent) {
-    
+
     return SequentialAgent.builder()
         .name("DataPipeline")
         .agents(List.of(
@@ -776,10 +1515,10 @@ public SequentialAgent pipelineAgent(
 // 使用
 @Service
 public class PipelineService {
-    
+
     @Autowired
     private SequentialAgent pipelineAgent;
-    
+
     public String runPipeline(String input) {
         return pipelineAgent.call(input);
     }
@@ -794,7 +1533,7 @@ public ParallelAgent parallelAnalysisAgent(
         ReactAgent sentimentAgent,
         ReactAgent entityAgent,
         ReactAgent summaryAgent) {
-    
+
     return ParallelAgent.builder()
         .name("ParallelAnalyzer")
         .agents(List.of(
@@ -820,7 +1559,7 @@ public ParallelAgent parallelAnalysisAgent(
 public RoutingAgent smartRouterAgent(
         ChatModel chatModel,
         Map<String, ReactAgent> specializedAgents) {
-    
+
     return RoutingAgent.builder()
         .name("SmartRouter")
         .model(chatModel)
@@ -851,17 +1590,17 @@ public RoutingAgent smartRouterAgent(
 public LoopAgent iterativeRefinementAgent(
         ReactAgent refinementAgent,
         ChatModel chatModel) {
-    
+
     return LoopAgent.builder()
         .name("RefinementLoop")
         .agent(refinementAgent)
         .maxIterations(5)
         .exitCondition((context, output) -> {
             // 当质量达到要求时退出
-            return output.getText().contains("FINAL") 
+            return output.getText().contains("FINAL")
                 || context.getIteration() >= 5;
         })
-        .iterationPrompt((iteration, previousOutput) -> 
+        .iterationPrompt((iteration, previousOutput) ->
             "Iteration " + iteration + ". Previous: " + previousOutput)
         .build();
 }
@@ -876,7 +1615,7 @@ public LoopAgent iterativeRefinementAgent(
 ```java
 @Configuration
 public class AgentAsToolConfig {
-    
+
     // 定义专门的研究 Agent
     @Bean
     public ReactAgent researchAgent(ChatModel chatModel) {
@@ -886,7 +1625,7 @@ public class AgentAsToolConfig {
             .instruction("You are a research specialist. Deep dive into topics.")
             .build();
     }
-    
+
     // 将 Research Agent 包装为工具
     @Bean
     public ToolCallback researchTool(ReactAgent researchAgent) {
@@ -897,7 +1636,7 @@ public class AgentAsToolConfig {
             .inputType(ResearchRequest.class)
             .build();
     }
-    
+
     // 主 Agent 使用 Research Agent 作为工具
     @Bean
     public ReactAgent mainAgent(
@@ -922,7 +1661,7 @@ public class AgentAsToolConfig {
 ```java
 @Service
 public class ComplexWorkflowService {
-    
+
     // 定义工作流状态
     public record WorkflowState(
         String input,
@@ -931,7 +1670,7 @@ public class ComplexWorkflowService {
         String finalOutput,
         Map<String, Object> metadata
     ) {}
-    
+
     public CompiledGraph<WorkflowState> buildWorkflow() {
         return new StateGraph<>(WorkflowState.class)
             // 定义节点
@@ -939,7 +1678,7 @@ public class ComplexWorkflowService {
             .addNode("analyze", this::analysisNode)
             .addNode("enrich", this::enrichmentNode)
             .addNode("format", this::formattingNode)
-            
+
             // 定义条件分支
             .addConditionalEdge("preprocess", this::routeByComplexity,
                 Map.of(
@@ -948,15 +1687,15 @@ public class ComplexWorkflowService {
                 ))
             .addEdge("analyze", "enrich")
             .addEdge("enrich", "format")
-            
+
             // 入口和出口
             .addEdge(START, "preprocess")
             .addEdge("format", END)
-            
+
             // 编译
             .compile();
     }
-    
+
     private WorkflowState preprocessNode(WorkflowState state) {
         // 数据预处理逻辑
         String processed = state.input().toUpperCase();
@@ -968,11 +1707,11 @@ public class ComplexWorkflowService {
             state.metadata()
         );
     }
-    
+
     private String routeByComplexity(WorkflowState state) {
         return state.input().length() > 100 ? "complex" : "simple";
     }
-    
+
     // 其他节点实现...
 }
 ```
@@ -986,13 +1725,13 @@ public class ComplexWorkflowService {
 ```java
 @Configuration
 public class RagConfig {
-    
+
     @Bean
     public VectorStore vectorStore(EmbeddingModel embeddingModel) {
         // 使用 SimpleVectorStore 或 Redis/PGVector
         return SimpleVectorStore.builder(embeddingModel).build();
     }
-    
+
     @Bean
     public DocumentRetriever documentRetriever(VectorStore vectorStore) {
         return VectorStoreDocumentRetriever.builder()
@@ -1001,18 +1740,18 @@ public class RagConfig {
             .topK(5)
             .build();
     }
-    
+
     @Bean
     public ReactAgent ragAgent(
             ChatModel chatModel,
             DocumentRetriever retriever) {
-        
+
         String ragInstruction = """
             You are a helpful assistant with access to a knowledge base.
             Use the retrieved documents to answer questions accurately.
             If the documents don't contain the answer, say so clearly.
             """;
-        
+
         return ReactAgent.builder()
             .name("RagAgent")
             .model(chatModel)
@@ -1032,10 +1771,10 @@ public class RagConfig {
 ```java
 @Service
 public class DocumentIndexingService {
-    
+
     @Autowired
     private VectorStore vectorStore;
-    
+
     public void indexDocuments(List<Resource> documents) {
         TokenTextSplitter splitter = new TokenTextSplitter(
             500,  // chunk size
@@ -1044,14 +1783,14 @@ public class DocumentIndexingService {
             1000, // max chunk size
             true  // keep separator
         );
-        
+
         for (Resource doc : documents) {
             // 读取文档
             String content = readDocument(doc);
-            
+
             // 分块
             List<String> chunks = splitter.split(content);
-            
+
             // 创建 Document 对象并添加元数据
             List<Document> documents = chunks.stream()
                 .map(chunk -> new Document(
@@ -1062,7 +1801,7 @@ public class DocumentIndexingService {
                     )
                 ))
                 .toList();
-            
+
             // 存入向量数据库
             vectorStore.add(documents);
         }
@@ -1105,7 +1844,7 @@ public ReactAgent multiQueryRagAgent(ChatModel chatModel) {
 ```java
 @Service
 public class GraphWorkflowService {
-    
+
     public CompiledGraph<Map<String, Object>> createSimpleGraph() {
         return new StateGraph<Map<String, Object>>(Map.class)
             .addNode("step1", (state) -> {
@@ -1130,7 +1869,7 @@ public class GraphWorkflowService {
 @Bean
 public CompiledGraph<AppState> persistentGraph(
         BaseCheckpointSaver saver) {
-    
+
     return new StateGraph<>(AppState.class)
         .addNode("process", this::processNode)
         .addNode("review", this::reviewNode)
@@ -1150,7 +1889,7 @@ public AppState resumeFromCheckpoint(
         CompiledGraph<AppState> graph,
         String threadId,
         int checkpointId) {
-    
+
     return graph.invoke(
         new AppState(),
         RunnableConfig.builder()
@@ -1170,7 +1909,7 @@ public StateGraph<ParentState> createParentGraph() {
         .addNode("child_process", this::childProcess)
         .addEdge(START, "child_process")
         .addEdge("child_process", END);
-    
+
     // 父图使用子图作为节点
     return new StateGraph<>(ParentState.class)
         .addNode("parent_start", this::parentStart)
@@ -1195,12 +1934,12 @@ A2A 允许分布式 Agent 相互通信协作。
 @Configuration
 @EnableA2A
 public class A2AConfig {
-    
+
     @Bean
     public AgentRegistry agentRegistry(NamingService namingService) {
         return new NacosAgentRegistry(namingService);
     }
-    
+
     @Bean
     public A2AServer a2aServer(AgentRegistry registry) {
         return A2AServer.builder()
@@ -1216,10 +1955,10 @@ public class A2AConfig {
 ```java
 @Service
 public class AgentRegistrationService {
-    
+
     @Autowired
     private AgentRegistry registry;
-    
+
     @PostConstruct
     public void register() {
         AgentDescriptor descriptor = AgentDescriptor.builder()
@@ -1233,7 +1972,7 @@ public class AgentRegistrationService {
                     .build()
             ))
             .build();
-        
+
         registry.register(descriptor);
     }
 }
@@ -1244,14 +1983,14 @@ public class AgentRegistrationService {
 ```java
 @Service
 public class A2AClientService {
-    
+
     @Autowired
     private A2AClient a2aClient;
-    
+
     public String callRemoteAgent(String agentName, String task) {
         // 发现 Agent
         AgentDescriptor agent = a2aClient.discover(agentName);
-        
+
         // 构建任务请求
         TaskRequest request = TaskRequest.builder()
             .id(UUID.randomUUID().toString())
@@ -1260,13 +1999,13 @@ public class A2AClientService {
                 .content(task)
                 .build())
             .build();
-        
+
         // 发送任务并获取结果
         TaskResponse response = a2aClient.sendTask(
             agent.getEndpoint(),
             request
         );
-        
+
         return response.getResult();
     }
 }
@@ -1307,7 +2046,7 @@ spring:
 ```java
 @Configuration
 public class ChatUiConfig {
-    
+
     @Bean
     public ChatUiCustomizer chatUiCustomizer() {
         return builder -> builder
@@ -1356,10 +2095,10 @@ DeepResearch 是基于 Spring AI Alibaba 的深度研究 Agent。
 ```java
 @Service
 public class DeepResearchService {
-    
+
     @Autowired
     private DeepResearchAgent researchAgent;
-    
+
     public ResearchReport conductResearch(String topic) {
         return researchAgent.research(
             ResearchRequest.builder()
@@ -1383,7 +2122,7 @@ public class DeepResearchService {
 public DeepResearchAgent customResearchAgent(
         ChatModel chatModel,
         List<ResearchTool> tools) {
-    
+
     return DeepResearchAgent.builder()
         .name("CustomResearcher")
         .model(chatModel)
@@ -1405,12 +2144,12 @@ Data Agent 用于自然语言查询数据库。
 ```java
 @Configuration
 public class DataAgentConfig {
-    
+
     @Bean
     public DataAgent dataAgent(
             ChatModel chatModel,
             DataSource dataSource) {
-        
+
         return DataAgent.builder()
             .name("SQLAgent")
             .model(chatModel)
@@ -1431,10 +2170,10 @@ public class DataAgentConfig {
 ```java
 @Service
 public class DataQueryService {
-    
+
     @Autowired
     private DataAgent dataAgent;
-    
+
     public QueryResult query(String naturalLanguageQuery) {
         return dataAgent.query(
             "查询上个月销售额最高的前 10 个产品"
@@ -1455,7 +2194,7 @@ public AssistantAgent assistantAgent(
         ChatModel chatModel,
         List<ToolCallback> tools,
         MemorySaver memorySaver) {
-    
+
     return AssistantAgent.builder()
         .name("Assistant")
         .model(chatModel)
@@ -1466,7 +2205,7 @@ public AssistantAgent assistantAgent(
             - Performing calculations
             - Searching information
             - Writing and editing text
-            
+
             Be helpful, accurate, and concise.
             """)
         .tools(tools)
@@ -1554,10 +2293,10 @@ public AgentObservationCustomizer observationCustomizer() {
 ```java
 @Configuration
 public class AgentSecurityConfig {
-    
+
     @Bean
     public ToolCallback secureTool(ToolCallback originalTool) {
-        return new SecureToolWrapper(originalTool, 
+        return new SecureToolWrapper(originalTool,
             tool -> {
                 // 验证工具调用权限
                 return SecurityContextHolder.getContext()
